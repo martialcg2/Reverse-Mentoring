@@ -1,82 +1,64 @@
-# API Cross-Mentoring Digital Banking
+# Frontend Cross-Mentoring Digital Banking
 
-Backend **FastAPI + PostgreSQL** pour la plateforme de mentorat croisé de Crédit du Congo (Groupe Attijariwafa Bank), avec le **firewall de confidentialité appliqué côté serveur**.
+Interface **React (Vite)** câblée à l'API FastAPI. Écran de connexion réel (JWT), et **toutes les données viennent du serveur** — le scoring des compétences est calculé côté backend, jamais côté client.
 
-## Le verrou d'étanchéité (l'essentiel)
+## Prérequis
 
-Le firewall n'est pas dans l'interface : il est dans le serveur (`app/firewall.py`).
-
-- Un profil **RH / admin n'obtient jamais** le score ou le niveau individuel d'un collaborateur, par aucune route. `can_view_scores()` n'autorise que le sujet lui-même et son mentor actif.
-- Les schémas de sortie RH (`ParticipantAdminOut`) **n'ont pas de champ de score** — la fuite est structurellement impossible.
-- Les agrégats appliquent le **seuil d'anonymisation** `MIN_N = 5` en dur (`enforce_min_n`).
-- Les **notes de séance** sont réservées au binôme.
-- Le **scoring 8 niveaux est autoritatif** côté serveur : le client ne calcule jamais un niveau opposable.
-
-Ces garanties sont prouvées par `tests/test_firewall.py` (8 tests).
+Le [backend](../cdc-backend) doit être déployé (ou lancé en local sur `http://localhost:8000`).
 
 ## Lancer en local
 
 ```bash
-python -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-uvicorn app.main:app --reload
-# Documentation interactive : http://localhost:8000/docs
+npm install
+cp .env.example .env          # puis renseignez VITE_API_URL si besoin
+npm run dev                   # http://localhost:5173
 ```
 
-La base SQLite est créée et peuplée automatiquement au démarrage.
-Comptes de démo (mot de passe `demo1234`) : `rh@cdc.cg`, `nadia@cdc.cg` (mentor), `sophie@cdc.cg` (mentorée).
+Par défaut, l'app appelle `http://localhost:8000`. Lancez le backend en parallèle, puis
+connectez-vous avec un compte de démo (mot de passe `demo1234`) :
 
-## Tests
+| Rôle | Email |
+|---|---|
+| RH / Admin | `rh@cdc.cg` |
+| Mentor | `nadia@cdc.cg` |
+| Mentorée | `sophie@cdc.cg` |
 
-```bash
-pytest tests/ -v
-```
+## Ce que fait chaque espace (données réelles du backend)
 
-## Déploiement gratuit (Render + Neon)
+- **Mentoré** — profil et radar depuis `/me/competencies` ; le **diagnostic est posté** à `/me/diagnostic` (le serveur calcule les 8 niveaux) ; passeport.
+- **Mentor** — `/mentor/mentees`, puis `/mentor/mentees/{id}/competencies` (le serveur **refuse 403** si le mentor n'est pas le binôme) ; playbook par niveau ; séance via `/mentor/sessions`.
+- **RH** — tableau de bord, suivi, cartographie (agrégats, blocage sous n=5), matching à valider, **CRUD participants**, reporting téléchargeable. Aucune route ne renvoie de score individuel à la RH.
 
-1. **Base de données** — créez une base PostgreSQL gratuite sur [neon.tech](https://neon.tech) et copiez l'URL de connexion (`postgresql://…?sslmode=require`).
-2. **Dépôt** — poussez ce dossier sur GitHub.
-3. **API** — sur [render.com](https://render.com) : *New +* → *Blueprint* → sélectionnez le dépôt (le fichier `render.yaml` est détecté). Renseignez :
-   - `DATABASE_URL` = l'URL Neon,
-   - `CORS_ORIGINS` = l'URL de votre frontend,
-   - `SECRET_KEY` est générée automatiquement.
-4. Render construit et déploie. Vérifiez `https://votre-api.onrender.com/health`.
+## Déploiement gratuit (Vercel ou Netlify)
 
-Alternatives équivalentes : **Railway**, **Fly.io** (un `Dockerfile` est fourni), avec **Neon** ou **Supabase** pour Postgres.
+1. Poussez ce dossier sur GitHub.
+2. **Vercel** : *New Project* → importez le dépôt. Framework détecté : Vite. Ajoutez la variable d'environnement `VITE_API_URL` = l'URL publique de votre API (ex. `https://cross-mentoring-api.onrender.com`). Déployez.
+   - *Netlify* : identique — build command `npm run build`, publish `dist`, variable `VITE_API_URL`.
+3. **Côté backend**, autorisez l'origine du frontend : variable `CORS_ORIGINS` = l'URL Vercel/Netlify (ex. `https://mon-app.vercel.app`).
 
-> Offre gratuite : l'instance Render s'endort après inactivité (première requête un peu lente) ; Neon est persistant. Suffisant pour une démo / un pilote.
+C'est tout : backend (Render + Neon) + frontend (Vercel) = plateforme en ligne, gratuite.
 
-## Endpoints principaux
+## Configuration
 
-| Méthode | Route | Rôle | Objet |
-|---|---|---|---|
-| POST | `/auth/login` | tous | Jeton JWT |
-| GET | `/me/competencies` | sujet | Ses propres scores |
-| POST | `/me/diagnostic` | mentorés | Soumet le diagnostic (scoring serveur) |
-| GET | `/mentor/mentees` | mentor | Ses mentorés |
-| GET | `/mentor/mentees/{id}/competencies` | mentor | Scores **si binôme** |
-| POST | `/mentor/sessions` | mentor | Enregistre une séance (progression) |
-| GET/POST/PUT/DELETE | `/rh/participants` | RH | CRUD (champs administratifs) |
-| GET | `/rh/matching/proposals` | RH | Binômes proposés (compatibilité, pas de score) |
-| POST | `/rh/matching/validate` | RH | Valide un binôme |
-| GET | `/rh/reporting/cartography` | RH | Agrégats (seuil n≥5) |
-| GET | `/rh/reporting/summary` | RH | Synthèse |
-| GET | `/rh/reporting/tracking` | RH | Suivi par participant (sans score) |
-
-## Passage en production (au-delà de la démo)
-
-- **Authentification** : remplacer le login local par le **SSO d'entreprise + MFA** (OIDC/SAML) ; le modèle de rôles reste inchangé.
-- **Migrations** : ce projet crée les tables au démarrage. En production, gérer le schéma avec **Alembic**.
-- **Sécurité** : `SECRET_KEY` robuste, `CORS_ORIGINS` restreint, HTTPS (fourni par l'hébergeur), journalisation et sauvegardes.
-- **Souveraineté** : cet hébergement gratuit est hors entreprise ; pour la donnée bancaire réelle, revalider la localisation avec la Conformité (droit congolais, COBAC/CEMAC, politiques Groupe).
+| Variable | Rôle | Défaut |
+|---|---|---|
+| `VITE_API_URL` | URL de l'API FastAPI | `http://localhost:8000` |
 
 ## Structure
 
 ```
-app/
-  main.py         config.py      database.py     security.py
-  models.py       schemas.py     firewall.py     engine.py     seed.py
-  routers/  auth.py  me.py  mentoring.py  rh.py
-tests/  test_firewall.py
-Dockerfile  render.yaml  requirements.txt  .env.example
+src/
+  main.jsx  App.jsx        # auth, shell, routage par rôle
+  api.js                    # client HTTP + jeton JWT
+  common.jsx                # constantes métier + composants UI (radar, cartes…)
+  screens/
+    Login.jsx
+    Mentee.jsx  questions.js
+    Mentor.jsx
+    RH.jsx
 ```
+
+## Note production
+
+Le login local (email/mot de passe) est destiné à la démo / au pilote. En production,
+il cède la place au **SSO d'entreprise + MFA** (le modèle de rôles ne change pas).
